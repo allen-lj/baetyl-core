@@ -20,7 +20,7 @@ type EngineConfig struct {
 	Kind       string           `yaml:"kind" json:"kind" default:"kubernetes"`
 	Kubernetes KubernetesConfig `yaml:"kubernetes" json:"kubernetes"`
 	Collector  struct {
-		Interval time.Duration `yaml:"interval" json:"interval"`
+		Interval time.Duration `yaml:"interval" json:"interval" default:"20s"`
 	} `yaml:"collector" json:"collector"`
 }
 
@@ -41,11 +41,10 @@ type SyncConfig struct {
 	Cloud struct {
 		HTTP   http.ClientConfig `yaml:"http" json:"http"`
 		Report struct {
-			URL      string        `yaml:"url" json:"url" default:"/v1/sync/report"`
-			Interval time.Duration `yaml:"interval" json:"interval" default:"10s"`
+			URL string `yaml:"url" json:"url" default:"v1/sync/report"`
 		} `yaml:"report" json:"report"`
 		Desire struct {
-			URL string `yaml:"url" json:"url" default:"/v1/sync/desire"`
+			URL string `yaml:"url" json:"url" default:"v1/sync/desire"`
 		} `yaml:"desire" json:"desire"`
 	} `yaml:"cloud" json:"cloud"`
 	Edge struct {
@@ -55,10 +54,10 @@ type SyncConfig struct {
 
 type InitConfig struct {
 	Batch struct {
-		Name         string `json:"name,omitempty"`
-		Namespace    string `json:"namespace,omitempty"`
-		SecurityType string `json:"securityType,omitempty"`
-		SecurityKey  string `json:"securityKey,omitempty"`
+		Name         string `yaml:"name" json:"name"`
+		Namespace    string `yaml:"namespace" json:"namespace"`
+		SecurityType string `yaml:"securityType" json:"securityType"`
+		SecurityKey  string `yaml:"securityKey" json:"securityKey"`
 	} `yaml:"batch" json:"batch"`
 	Cloud struct {
 		HTTP   http.ClientConfig `yaml:"http" json:"http"`

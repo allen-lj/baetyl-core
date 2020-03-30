@@ -16,13 +16,13 @@ const (
 	AppName     = "baetyl-app-name"
 	AppVersion  = "baetyl-app-version"
 	ServiceName = "baetyl-service-name"
-  
+
 	RegistryAddress  = "address"
 	RegistryUsername = "username"
 	RegistryPassword = "password"
 )
 
-func (k *kubeModel) Apply(appInfos []specv1.AppInfo) error {
+func (k *kubeImpl) Apply(appInfos []specv1.AppInfo) error {
 	appMap := map[string]string{}
 	configs := map[string]*corev1.ConfigMap{}
 	secrets := map[string]*corev1.Secret{}
@@ -108,7 +108,7 @@ func (k *kubeModel) Apply(appInfos []specv1.AppInfo) error {
 	return nil
 }
 
-func (k *kubeModel) applyDeploys(deploys map[string]*appv1.Deployment) error {
+func (k *kubeImpl) applyDeploys(deploys map[string]*appv1.Deployment) error {
 	deployInterface := k.cli.App.Deployments(k.cli.Namespace)
 	ls := kl.Set{}
 	selector := map[string]string{
@@ -139,8 +139,9 @@ func (k *kubeModel) applyDeploys(deploys map[string]*appv1.Deployment) error {
 		}
 	}
 	for _, d := range deploys {
-		_, err := deployInterface.Get(d.Name, metav1.GetOptions{})
-		if err == nil {
+		deploy, err := deployInterface.Get(d.Name, metav1.GetOptions{})
+		if deploy != nil && err == nil {
+			d.ResourceVersion = deploy.ResourceVersion
 			_, err = deployInterface.Update(d)
 			if err != nil {
 				return err
@@ -155,11 +156,11 @@ func (k *kubeModel) applyDeploys(deploys map[string]*appv1.Deployment) error {
 	return nil
 }
 
-func (k *kubeModel) applyServices(services map[string]*corev1.Service) error {
+func (k *kubeImpl) applyServices(services map[string]*corev1.Service) error {
 	serviceInterface := k.cli.Core.Services(k.cli.Namespace)
 	for _, s := range services {
 		service, err := serviceInterface.Get(s.Name, metav1.GetOptions{})
-		if err == nil {
+		if service != nil && err == nil {
 			s.ResourceVersion = service.ResourceVersion
 			_, err := serviceInterface.Update(s)
 			if err != nil {
@@ -175,11 +176,12 @@ func (k *kubeModel) applyServices(services map[string]*corev1.Service) error {
 	return nil
 }
 
-func (k *kubeModel) applyConfigMaps(configMaps map[string]*corev1.ConfigMap) error {
+func (k *kubeImpl) applyConfigMaps(configMaps map[string]*corev1.ConfigMap) error {
 	configMapInterface := k.cli.Core.ConfigMaps(k.cli.Namespace)
 	for _, cfg := range configMaps {
-		_, err := configMapInterface.Get(cfg.Name, metav1.GetOptions{})
-		if err == nil {
+		config, err := configMapInterface.Get(cfg.Name, metav1.GetOptions{})
+		if config != nil && err == nil {
+			cfg.ResourceVersion = config.ResourceVersion
 			_, err := configMapInterface.Update(cfg)
 			if err != nil {
 				return err
@@ -194,11 +196,12 @@ func (k *kubeModel) applyConfigMaps(configMaps map[string]*corev1.ConfigMap) err
 	return nil
 }
 
-func (k *kubeModel) applySecrets(secrets map[string]*corev1.Secret) error {
+func (k *kubeImpl) applySecrets(secrets map[string]*corev1.Secret) error {
 	secretInterface := k.cli.Core.Secrets(k.cli.Namespace)
 	for _, sec := range secrets {
-		_, err := secretInterface.Get(sec.Name, metav1.GetOptions{})
-		if err == nil {
+		secret, err := secretInterface.Get(sec.Name, metav1.GetOptions{})
+		if secret != nil && err == nil {
+			sec.ResourceVersion = secret.ResourceVersion
 			_, err := secretInterface.Update(sec)
 			if err != nil {
 				return err
@@ -224,13 +227,15 @@ func toDeploy(app *crd.Application, service *crd.Service, vols []crd.Volume,
 	if err != nil {
 		return nil, err
 	}
-	c.Resources.Limits = corev1.ResourceList{}
-	for n, value := range service.Resources.Limits {
-		quantity, err := resource.ParseQuantity(value)
-		if err != nil {
-			return nil, err
+	if service.Resources != nil {
+		c.Resources.Limits = corev1.ResourceList{}
+		for n, value := range service.Resources.Limits {
+			quantity, err := resource.ParseQuantity(value)
+			if err != nil {
+				return nil, err
+			}
+			c.Resources.Limits[corev1.ResourceName(n)] = quantity
 		}
-		c.Resources.Limits[corev1.ResourceName(n)] = quantity
 	}
 	var containers []corev1.Container
 	containers = append(containers, c)
@@ -311,7 +316,7 @@ func toConfigMap(config *crd.Configuration) (*corev1.ConfigMap, error) {
 func toSecret(sec *crd.Secret) (*corev1.Secret, error) {
 	// secret for docker config
 	if isRegistrySecret(sec) {
-		return GenerateRegistrySecret(sec.Name, string(sec.Data[RegistryAddress]),
+		return generateRegistrySecret(sec.Name, string(sec.Data[RegistryAddress]),
 			string(sec.Data[RegistryUsername]), string(sec.Data[RegistryPassword]))
 	}
 
