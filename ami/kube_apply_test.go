@@ -4,26 +4,29 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"testing"
+
 	"github.com/baetyl/baetyl-core/store"
+	"github.com/baetyl/baetyl-go/log"
 	"github.com/baetyl/baetyl-go/spec/crd"
 	specv1 "github.com/baetyl/baetyl-go/spec/v1"
 	"github.com/stretchr/testify/assert"
-	"io/ioutil"
 	appv1 "k8s.io/api/apps/v1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
-	"testing"
 )
 
-func TestApply(t *testing.T) {
+func TestKubeApply(t *testing.T) {
 	ami := initApplyKubeAMI(t)
+	ns := "baetyl-edge"
 	app := &crd.Application{
 		Name:      "app1",
-		Namespace: "baetyl-edge",
+		Namespace: ns,
 		Version:   "a1",
 		Services: []crd.Service{{
 			Name: "svc1",
@@ -45,14 +48,14 @@ func TestApply(t *testing.T) {
 	assert.NoError(t, err)
 	cfg := &crd.Configuration{
 		Name:      "cfg1",
-		Namespace: "baetyl-edge",
+		Namespace: ns,
 		Version:   "c1",
 	}
 	key = makeKey(crd.KindConfiguration, cfg.Name, cfg.Version)
 	err = ami.store.Upsert(key, cfg)
 	sec := &crd.Secret{
 		Name:      "sec1",
-		Namespace: "baetyl-edge",
+		Namespace: ns,
 		Version:   "s1",
 	}
 	key = makeKey(crd.KindSecret, sec.Name, sec.Version)
@@ -61,14 +64,16 @@ func TestApply(t *testing.T) {
 		Name:    "app1",
 		Version: "a1",
 	}}
-	err = ami.Apply(infos)
+	err = ami.Apply(ns, infos)
 	assert.NoError(t, err)
 }
 
-func TestToConfigMap(t *testing.T) {
+func TestKubePrepareConfigMap(t *testing.T) {
+	ami := initApplyKubeAMI(t)
+	ns := "baetyl-edge"
 	config := &crd.Configuration{
 		Name:      "cfg",
-		Namespace: "baetyl-edge",
+		Namespace: ns,
 		Data: map[string]string{
 			"test-key": "test-val",
 		},
@@ -79,22 +84,24 @@ func TestToConfigMap(t *testing.T) {
 			"test-key": "test-val",
 		},
 	}
-	configMap, err := toConfigMap(config)
+	configMap, err := ami.prepareConfigMap(ns, config)
 	assert.NoError(t, err)
 	assert.Equal(t, configMap, expected)
 }
 
-func TestToSecret(t *testing.T) {
+func TestKubeToSecret(t *testing.T) {
+	ami := initApplyKubeAMI(t)
+	ns := "baetyl-edge"
 	sec := &crd.Secret{
 		Name:      "sec",
-		Namespace: "baetyl-edge",
+		Namespace: ns,
 	}
 	secKey := "sec-key"
 	secVal := "sec-val"
 	sec.Data = map[string][]byte{
 		secKey: []byte(secVal),
 	}
-	secret, err := toSecret(sec)
+	secret, err := ami.prepareSecret(ns, sec)
 	assert.NoError(t, err)
 	expected := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "sec", Namespace: "baetyl-edge"},
@@ -114,10 +121,10 @@ func TestToSecret(t *testing.T) {
 		RegistryUsername: []byte("test"),
 		RegistryPassword: []byte("1234"),
 	}
-	registry, err := toSecret(reg)
+	registry, err := ami.prepareSecret(ns, reg)
 	assert.NoError(t, err)
 	expected = &v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "registry"},
+		ObjectMeta: metav1.ObjectMeta{Name: "registry", Namespace: ns},
 		Type:       v1.SecretTypeDockerConfigJson,
 	}
 	auths := map[string]interface{}{
@@ -136,17 +143,18 @@ func TestToSecret(t *testing.T) {
 	assert.Equal(t, registry, expected)
 }
 
-func TestToService(t *testing.T) {
+func TestKubeToService(t *testing.T) {
+	ami := initApplyKubeAMI(t)
 	svcName := "svc"
-	namespace := "baetyl-edge"
+	ns := "baetyl-edge"
 	svc := &crd.Service{
 		Name:  svcName,
 		Ports: []crd.ContainerPort{{ContainerPort: 80}, {ContainerPort: 8080}},
 	}
-	service, err := toService(namespace, svc)
+	service, err := ami.prepareService(ns, svc)
 	assert.NoError(t, err)
 	expected := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{{
 				Port:       80,
@@ -156,7 +164,7 @@ func TestToService(t *testing.T) {
 				TargetPort: intstr.IntOrString{IntVal: 8080},
 			}},
 			Selector: map[string]string{
-				"baetyl": svcName,
+				ServiceName: svcName,
 			},
 			ClusterIP: "None",
 		},
@@ -165,17 +173,18 @@ func TestToService(t *testing.T) {
 	svc = &crd.Service{
 		Name: svcName,
 	}
-	service, err = toService(namespace, svc)
+	service, err = ami.prepareService(ns, svc)
 	assert.NoError(t, err)
 	assert.Nil(t, service)
 }
 
-func TestToDeploy(t *testing.T) {
-	namespace := "baetyl-edge"
+func TestKubeToDeploy(t *testing.T) {
+	ami := initApplyKubeAMI(t)
+	ns := "baetyl-edge"
 	svcName := "svc"
 	app := &crd.Application{
 		Name:      "app",
-		Namespace: namespace,
+		Namespace: ns,
 		Version:   "a1",
 	}
 	svc := &crd.Service{
@@ -218,17 +227,14 @@ func TestToDeploy(t *testing.T) {
 			HostPath: &crd.HostPathVolumeSource{Path: "/var/lib/baetyl"},
 		},
 	}}
-	deploy, err := toDeploy(app, svc, volumes, nil)
+	deploy, err := ami.prepareDeploy(ns, app, svc, volumes, nil)
 	assert.NoError(t, err)
 	replica := new(int32)
 	*replica = 1
 	expected := &appv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      svcName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"baetyl": "baetyl",
-			}},
+			Namespace: ns},
 		Spec: appv1.DeploymentSpec{
 			Replicas: replica,
 			Selector: &metav1.LabelSelector{
@@ -239,13 +245,13 @@ func TestToDeploy(t *testing.T) {
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"baetyl":    "baetyl",
 						AppName:     app.Name,
 						AppVersion:  app.Version,
 						ServiceName: svcName,
 					},
 				},
 				Spec: v1.PodSpec{
+					ServiceAccountName: ServiceAccountName,
 					Volumes: []v1.Volume{
 						{
 							Name: "cfg",
@@ -273,6 +279,7 @@ func TestToDeploy(t *testing.T) {
 						},
 					},
 					Containers: []v1.Container{{
+						Env:  []v1.EnvVar{{Name: KubeNodeName, Value: "node1"}},
 						Name: "svc",
 						Resources: v1.ResourceRequirements{
 							Limits: v1.ResourceList{
@@ -299,7 +306,7 @@ func TestToDeploy(t *testing.T) {
 	assert.Equal(t, deploy, expected)
 }
 
-func TestApplyDeploy(t *testing.T) {
+func TestKubeApplyDeploy(t *testing.T) {
 	ami := initApplyKubeAMI(t)
 	ns := "baetyl-edge"
 	lables := map[string]string{
@@ -313,7 +320,7 @@ func TestApplyDeploy(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "d2", Namespace: ns, Labels: lables},
 		},
 	}
-	err := ami.applyDeploys(ds)
+	err := ami.applyDeploys(ns, ds)
 	assert.NoError(t, err)
 
 	wrongDs := map[string]*appv1.Deployment{
@@ -324,7 +331,7 @@ func TestApplyDeploy(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "d3", Namespace: "default", Labels: lables},
 		},
 	}
-	err = ami.applyDeploys(wrongDs)
+	err = ami.applyDeploys(ns, wrongDs)
 	assert.Error(t, err)
 
 	deleteDs := map[string]*appv1.Deployment{
@@ -332,13 +339,13 @@ func TestApplyDeploy(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "d3", Namespace: ns, Labels: lables},
 		},
 	}
-	err = ami.applyDeploys(deleteDs)
+	err = ami.applyDeploys(ns, deleteDs)
 	assert.NoError(t, err)
-	_, err = ami.cli.App.Deployments(ns).Get("d1", metav1.GetOptions{})
+	_, err = ami.cli.app.Deployments(ns).Get("d1", metav1.GetOptions{})
 	assert.Error(t, err)
 }
 
-func TestApplySecret(t *testing.T) {
+func TestKubeApplySecret(t *testing.T) {
 	ami := initApplyKubeAMI(t)
 	ns := "baetyl-edge"
 	secs := map[string]*v1.Secret{
@@ -349,7 +356,7 @@ func TestApplySecret(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "sec2", Namespace: ns},
 		},
 	}
-	err := ami.applySecrets(secs)
+	err := ami.applySecrets(ns, secs)
 	assert.NoError(t, err)
 	wrongSecs := map[string]*v1.Secret{
 		"sec1": {
@@ -359,11 +366,11 @@ func TestApplySecret(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "sec3", Namespace: "default"},
 		},
 	}
-	err = ami.applySecrets(wrongSecs)
+	err = ami.applySecrets(ns, wrongSecs)
 	assert.Error(t, err)
 }
 
-func TestApplyConfigMap(t *testing.T) {
+func TestKubeApplyConfigMap(t *testing.T) {
 	ami := initApplyKubeAMI(t)
 	ns := "baetyl-edge"
 	cfgs := map[string]*v1.ConfigMap{
@@ -374,7 +381,7 @@ func TestApplyConfigMap(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "cfg2", Namespace: ns},
 		},
 	}
-	err := ami.applyConfigMaps(cfgs)
+	err := ami.applyConfigMaps(ns, cfgs)
 	assert.NoError(t, err)
 	wrongCfgs := map[string]*v1.ConfigMap{
 		"cfg1": {
@@ -384,11 +391,11 @@ func TestApplyConfigMap(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "cfg3", Namespace: "default"},
 		},
 	}
-	err = ami.applyConfigMaps(wrongCfgs)
+	err = ami.applyConfigMaps(ns, wrongCfgs)
 	assert.Error(t, err)
 }
 
-func TestApplyService(t *testing.T) {
+func TestKubeApplyService(t *testing.T) {
 	ami := initApplyKubeAMI(t)
 	ns := "baetyl-edge"
 	svcs := map[string]*v1.Service{
@@ -399,7 +406,7 @@ func TestApplyService(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "svc2", Namespace: ns},
 		},
 	}
-	err := ami.applyServices(svcs)
+	err := ami.applyServices(ns, svcs)
 	assert.NoError(t, err)
 	wrongSvcs := map[string]*v1.Service{
 		"svc1": {
@@ -409,7 +416,7 @@ func TestApplyService(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "svc3", Namespace: "default"},
 		},
 	}
-	err = ami.applyServices(wrongSvcs)
+	err = ami.applyServices(ns, wrongSvcs)
 	assert.Error(t, err)
 }
 
@@ -426,7 +433,7 @@ func genApplyRuntime() []runtime.Object {
 			ObjectMeta: metav1.ObjectMeta{Name: "svc1", Namespace: ns},
 		},
 		&appv1.Deployment{
-			ObjectMeta: metav1.ObjectMeta{Name: "d1", Namespace: ns, Labels: map[string]string{"baetyl": "baetyl"}},
+			ObjectMeta: metav1.ObjectMeta{Name: "d1", Namespace: ns},
 		},
 	}
 	return rs
@@ -434,10 +441,9 @@ func genApplyRuntime() []runtime.Object {
 
 func initApplyKubeAMI(t *testing.T) *kubeImpl {
 	fc := fake.NewSimpleClientset(genApplyRuntime()...)
-	cli := Client{
-		Namespace: "baetyl-edge",
-		Core:      fc.CoreV1(),
-		App:       fc.AppsV1(),
+	cli := client{
+		core: fc.CoreV1(),
+		app:  fc.AppsV1(),
 	}
 	f, err := ioutil.TempFile("", t.Name())
 	assert.NoError(t, err)
@@ -446,5 +452,5 @@ func initApplyKubeAMI(t *testing.T) *kubeImpl {
 	sto, err := store.NewBoltHold(f.Name())
 	assert.NoError(t, err)
 	assert.NotNil(t, sto)
-	return &kubeImpl{cli: &cli, store: sto}
+	return &kubeImpl{cli: &cli, store: sto, knn: "node1", log: log.With()}
 }

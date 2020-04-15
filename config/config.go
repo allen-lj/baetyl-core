@@ -9,19 +9,20 @@ import (
 
 // Config the core config
 type Config struct {
-	Engine EngineConfig `yaml:"engine" json:"engine"`
-	Sync   SyncConfig   `yaml:"sync" json:"sync"`
-	Store  StoreConfig  `yaml:"store" json:"store"`
-	Init   InitConfig   `yaml:"init" json:"init"`
-	Logger log.Config   `yaml:"logger" json:"logger"`
+	Engine EngineConfig      `yaml:"engine" json:"engine"`
+	Sync   SyncConfig        `yaml:"sync" json:"sync"`
+	Store  StoreConfig       `yaml:"store" json:"store"`
+	Init   InitConfig        `yaml:"init" json:"init"`
+	Server http.ServerConfig `yaml:"server" json:"server"`
+	Logger log.Config        `yaml:"logger" json:"logger"`
 }
 
 type EngineConfig struct {
 	Kind       string           `yaml:"kind" json:"kind" default:"kubernetes"`
 	Kubernetes KubernetesConfig `yaml:"kubernetes" json:"kubernetes"`
-	Collector  struct {
-		Interval time.Duration `yaml:"interval" json:"interval" default:"20s"`
-	} `yaml:"collector" json:"collector"`
+	Report     struct {
+		Interval time.Duration `yaml:"interval" json:"interval" default:"10s"`
+	} `yaml:"report" json:"report"`
 }
 
 type KubernetesConfig struct {
@@ -34,14 +35,11 @@ type StoreConfig struct {
 }
 
 type SyncConfig struct {
-	Node struct {
-		Name      string `json:"name,omitempty"`
-		Namespace string `json:"namespace,omitempty"`
-	} `yaml:"node" json:"node"`
 	Cloud struct {
 		HTTP   http.ClientConfig `yaml:"http" json:"http"`
 		Report struct {
-			URL string `yaml:"url" json:"url" default:"v1/sync/report"`
+			URL      string        `yaml:"url" json:"url" default:"v1/sync/report"`
+			Interval time.Duration `yaml:"interval" json:"interval" default:"20s"`
 		} `yaml:"report" json:"report"`
 		Desire struct {
 			URL string `yaml:"url" json:"url" default:"v1/sync/desire"`

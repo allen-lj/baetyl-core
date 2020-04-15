@@ -12,13 +12,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	mfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 	"testing"
 )
 
 func TestCollectNodeInfo(t *testing.T) {
 	ami := initCollectKubeAMI(t)
-	node, err := ami.cli.Core.Nodes().Get("node1", metav1.GetOptions{})
+	node, err := ami.cli.core.Nodes().Get("node1", metav1.GetOptions{})
 	assert.NoError(t, err)
 	res := ami.collectNodeInfo(node)
 	expected := specv1.NodeInfo{
@@ -38,12 +37,9 @@ func TestCollectNodeInfo(t *testing.T) {
 
 func initCollectKubeAMI(t *testing.T) *kubeImpl {
 	fc := fake.NewSimpleClientset(genCollectRuntime()...)
-	mc := mfake.NewSimpleClientset(genMetricsRuntime()...)
-	cli := Client{
-		Namespace: "baetyl-edge",
-		Core:      fc.CoreV1(),
-		App:       fc.AppsV1(),
-		Metrics:   mc.MetricsV1beta1(),
+	cli := client{
+		core: fc.CoreV1(),
+		app:  fc.AppsV1(),
 	}
 	f, err := ioutil.TempFile("", t.Name())
 	assert.NoError(t, err)
@@ -53,11 +49,6 @@ func initCollectKubeAMI(t *testing.T) *kubeImpl {
 	assert.NoError(t, err)
 	assert.NotNil(t, sto)
 	return &kubeImpl{cli: &cli, store: sto, knn: "node1"}
-}
-
-func genMetricsRuntime() []runtime.Object {
-	rs := []runtime.Object{}
-	return rs
 }
 
 func genCollectRuntime() []runtime.Object {

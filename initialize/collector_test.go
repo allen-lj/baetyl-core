@@ -79,13 +79,17 @@ func TestInitialize_Activate_Err_Collector(t *testing.T) {
 	mockCtl := gomock.NewController(t)
 	defer mockCtl.Finish()
 
-	ami := mc.NewMockAMI(mockCtl)
-	ami.EXPECT().Collect().Return(inspect, nil).AnyTimes()
-
 	c := &config.Config{}
+	c.Engine.Kind = "kubernetes"
+	c.Engine.Kubernetes.InCluster = true
 	c.Init.Cloud.Active.Interval = 5 * time.Second
+
+	ami := mc.NewMockAMI(mockCtl)
+	ami.EXPECT().Collect(gomock.Any()).Return(inspect, nil).AnyTimes()
 	init, err := NewInit(c, ami)
 	assert.Nil(t, err)
+
+	init.Start()
 	init.Close()
 
 	for _, tt := range collectorBadCases {
@@ -106,7 +110,7 @@ func TestInitialize_Activate_Err_Ami(t *testing.T) {
 	defer mockCtl.Finish()
 
 	ami := mc.NewMockAMI(mockCtl)
-	ami.EXPECT().Collect().Return(nil, fmt.Errorf("ami error")).AnyTimes()
+	ami.EXPECT().Collect(gomock.Any()).Return(nil, fmt.Errorf("ami error")).AnyTimes()
 
 	c := &config.Config{}
 	c.Init.Cloud.Active.Interval = 5 * time.Second
